@@ -77,13 +77,15 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
   pi.registerCommand("memory-init", {
     description: "Initialize project memory structure from the current repository root",
     handler: async (_args, ctx) => {
-      const result = await initializeProjectMemory(ctx.cwd);
+      const result = await initializeProjectMemory(ctx);
       const detailLines = [
         result.ok ? `- Status: ok` : `- Status: skipped`,
         `- Initialized topic files: ${result.files.length}`,
         `- Project topic count: ${result.headers.length}`,
+        result.skipped ? `- Skipped: ${result.skipped}` : undefined,
+        result.error ? `- Error: ${result.error}` : undefined,
         ...result.files.map((filePath) => `- ${filePath}`),
-      ];
+      ].filter(Boolean);
 
       pi.sendMessage(
         {
