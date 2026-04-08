@@ -271,8 +271,8 @@ async function runExtractionSubagentWithRetries(
   options: Parameters<typeof runPiSubagent>[0],
 ) {
   // OpenAI Responses occasionally returns transient processing errors for heavier
-  // extraction requests even when the main chat request succeeds. Be patient.
-  const retryDelaysMs = [0, 2000, 5000, 10000, 20000];
+  // extraction requests even when the main chat request succeeds.
+  const retryDelaysMs = [0, 2000, 5000];
   let lastResult: Awaited<ReturnType<typeof runPiSubagent>> | undefined;
 
   for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {

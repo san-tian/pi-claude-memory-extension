@@ -1,0 +1,275 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { getProjectId } from "@san-tian/pi-project-paths";
+import {
+  rebuildProjectMemoryArtifacts,
+  renderTopicTemplate,
+  scanProjectTopicHeaders,
+} from "./memory-store.js";
+import { getProjectMemoryPaths } from "./paths.js";
+import type { MemoryTopicType, MemoryTopicHeader } from "./types.js";
+
+const INIT_TOPIC_IDS = ["repository-overview", "repository-layout", "repository-tooling"] as const;
+
+type InitTopicId = (typeof INIT_TOPIC_IDS)[number];
+
+type InitResult = {
+  ok: boolean;
+  headers: MemoryTopicHeader[];
+  files: string[];
+};
+
+export async function initializeProjectMemory(cwd: string): Promise<InitResult> {
+  const paths = getProjectMemoryPaths(cwd);
+  await fs.mkdir(paths.topicsDir, { recursive: true });
+
+  const snapshot = await collectProjectSnapshot(cwd);
+  const now = new Date().toISOString();
+  const topics = buildInitTopics(snapshot, now);
+  const files: string[] = [];
+
+  for (const topic of topics) {
+    const filePath = path.join(paths.topicsDir, `${topic.id}.md`);
+    await fs.writeFile(filePath, topic.content, "utf8");
+    files.push(filePath);
+  }
+
+  await rebuildProjectMemoryArtifacts(cwd);
+  const headers = await scanProjectTopicHeaders(cwd);
+  return { ok: true, headers, files };
+}
+
+type ProjectSnapshot = {
+  cwd: string;
+  projectId: string;
+  readmeTitle?: string;
+  readmeSummary?: string;
+  packageName?: string;
+  packageManager?: string;
+  topLevelDirs: string[];
+  topLevelFiles: string[];
+  keyFiles: string[];
+  packageScripts: string[];
+  ecosystems: string[];
+};
+
+async function collectProjectSnapshot(cwd: string): Promise<ProjectSnapshot> {
+  const entries = await fs.readdir(cwd, { withFileTypes: true }).catch(() => []);
+  const topLevelDirs = entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => entry.name)
+    .sort();
+  const topLevelFiles = entries
+    .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+    .map((entry) => entry.name)
+    .sort();
+
+  const readmePath = topLevelFiles.find((name) => name.toLowerCase() === "readme.md")
+    ? path.join(cwd, topLevelFiles.find((name) => name.toLowerCase() === "readme.md")!)
+    : undefined;
+  const packageJsonPath = topLevelFiles.includes("package.json") ? path.join(cwd, "package.json") : undefined;
+
+  const [readme, packageJson] = await Promise.all([
+    readmePath ? fs.readFile(readmePath, "utf8").catch(() => "") : Promise.resolve(""),
+    packageJsonPath ? fs.readFile(packageJsonPath, "utf8").catch(() => "") : Promise.resolve(""),
+  ]);
+
+  const parsedReadme = parseReadme(readme);
+  const parsedPackage = parsePackageJson(packageJson);
+  const keyFiles = topLevelFiles.filter((name) =>
+    [
+      "README.md",
+      "AGENTS.md",
+      "package.json",
+      "pnpm-workspace.yaml",
+      "bun.lock",
+      "bun.lockb",
+      "tsconfig.json",
+      "Cargo.toml",
+      "go.mod",
+      "pyproject.toml",
+      "Makefile",
+    ].includes(name),
+  );
+
+  return {
+    cwd,
+    projectId: getProjectId(cwd),
+    readmeTitle: parsedReadme.title,
+    readmeSummary: parsedReadme.summary,
+    packageName: parsedPackage.name,
+    packageManager: detectPackageManager(topLevelFiles),
+    topLevelDirs,
+    topLevelFiles,
+    keyFiles,
+    packageScripts: parsedPackage.scripts,
+    ecosystems: detectEcosystems(topLevelFiles),
+  };
+}
+
+function buildInitTopics(snapshot: ProjectSnapshot, updatedAt: string): Array<{ id: InitTopicId; content: string }> {
+  return [
+    buildTopic(
+      "repository-overview",
+      "Repository Overview",
+      "project",
+      buildOverviewSummary(snapshot),
+      updatedAt,
+      ["overview", ...snapshot.ecosystems.slice(0, 3)],
+      [
+        `- Project id: ${snapshot.projectId}`,
+        `- Working directory: ${snapshot.cwd}`,
+        snapshot.readmeTitle ? `- README title: ${snapshot.readmeTitle}` : undefined,
+        snapshot.readmeSummary ? `- README summary: ${snapshot.readmeSummary}` : undefined,
+        snapshot.packageName ? `- Package name: ${snapshot.packageName}` : undefined,
+        snapshot.packageManager ? `- Package manager signal: ${snapshot.packageManager}` : undefined,
+        snapshot.ecosystems.length > 0 ? `- Detected ecosystems: ${snapshot.ecosystems.join(", ")}` : undefined,
+      ],
+    ),
+    buildTopic(
+      "repository-layout",
+      "Repository Layout",
+      "project",
+      buildLayoutSummary(snapshot),
+      updatedAt,
+      ["layout", ...snapshot.topLevelDirs.slice(0, 4)],
+      [
+        snapshot.topLevelDirs.length > 0 ? `- Top-level directories: ${snapshot.topLevelDirs.join(", ")}` : "- No top-level directories detected.",
+        snapshot.topLevelFiles.length > 0 ? `- Top-level files: ${snapshot.topLevelFiles.join(", ")}` : "- No top-level files detected.",
+        snapshot.keyFiles.length > 0 ? `- Key entry files: ${snapshot.keyFiles.join(", ")}` : undefined,
+        "- This topic is generated by `/memory-init` and can be refreshed when the repository layout changes materially.",
+      ],
+    ),
+    buildTopic(
+      "repository-tooling",
+      "Repository Tooling",
+      "project",
+      buildToolingSummary(snapshot),
+      updatedAt,
+      ["tooling", ...(snapshot.packageScripts.length > 0 ? snapshot.packageScripts.slice(0, 3) : snapshot.ecosystems.slice(0, 3))],
+      [
+        snapshot.packageManager ? `- Package manager signal: ${snapshot.packageManager}` : undefined,
+        snapshot.packageScripts.length > 0 ? `- package.json scripts: ${snapshot.packageScripts.join(", ")}` : undefined,
+        snapshot.keyFiles.includes("tsconfig.json") ? "- TypeScript config detected via `tsconfig.json`." : undefined,
+        snapshot.keyFiles.includes("Cargo.toml") ? "- Rust tooling detected via `Cargo.toml`." : undefined,
+        snapshot.keyFiles.includes("go.mod") ? "- Go tooling detected via `go.mod`." : undefined,
+        snapshot.keyFiles.includes("pyproject.toml") ? "- Python tooling detected via `pyproject.toml`." : undefined,
+      ],
+    ),
+  ];
+}
+
+function buildTopic(
+  id: InitTopicId,
+  title: string,
+  type: MemoryTopicType,
+  summary: string,
+  updatedAt: string,
+  keywords: string[],
+  detailLines: Array<string | undefined>,
+): { id: InitTopicId; content: string } {
+  const base = renderTopicTemplate({
+    id,
+    title,
+    type,
+    summary,
+    updatedAt,
+    keywords: keywords.filter(Boolean),
+  });
+  const details = detailLines.filter(Boolean).join("\n");
+  return {
+    id,
+    content: `${base}${details ? `${details}\n` : ""}`,
+  };
+}
+
+function buildOverviewSummary(snapshot: ProjectSnapshot): string {
+  if (snapshot.readmeSummary) {
+    return snapshot.readmeSummary.slice(0, 180);
+  }
+  const name = snapshot.readmeTitle ?? snapshot.packageName ?? path.basename(snapshot.cwd);
+  const ecosystem = snapshot.ecosystems.length > 0 ? snapshot.ecosystems.join("/") : "project";
+  return `${name} is a ${ecosystem} repository that should be initialized from the current root structure before deeper memory extraction begins.`;
+}
+
+function buildLayoutSummary(snapshot: ProjectSnapshot): string {
+  if (snapshot.topLevelDirs.length === 0 && snapshot.topLevelFiles.length === 0) {
+    return "The repository root is currently sparse and should be rescanned once more files exist.";
+  }
+  const dirPreview = snapshot.topLevelDirs.slice(0, 4).join(", ") || "no major directories";
+  return `Top-level structure currently centers on ${dirPreview}, with key files anchored at the repository root.`;
+}
+
+function buildToolingSummary(snapshot: ProjectSnapshot): string {
+  if (snapshot.packageScripts.length > 0) {
+    return `Primary tooling is exposed through package scripts: ${snapshot.packageScripts.slice(0, 4).join(", ")}.`;
+  }
+  if (snapshot.ecosystems.length > 0) {
+    return `Primary tooling appears to come from the detected ecosystems: ${snapshot.ecosystems.join(", ")}.`;
+  }
+  return "No obvious build or package tooling was detected at the repository root yet.";
+}
+
+function parseReadme(content: string): { title?: string; summary?: string } {
+  if (!content.trim()) {
+    return {};
+  }
+  const normalized = content.replace(/\r\n/g, "\n");
+  const title = normalized.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  const paragraphs = normalized
+    .split(/\n\s*\n/)
+    .map((part) => part.replace(/^#+\s+.*$/gm, "").trim())
+    .filter(Boolean);
+  return {
+    title,
+    summary: paragraphs[0]?.slice(0, 240),
+  };
+}
+
+function parsePackageJson(content: string): { name?: string; scripts: string[] } {
+  if (!content.trim()) {
+    return { scripts: [] };
+  }
+  try {
+    const parsed = JSON.parse(content) as { name?: string; scripts?: Record<string, string> };
+    return {
+      name: parsed.name,
+      scripts: Object.keys(parsed.scripts ?? {}).sort(),
+    };
+  } catch {
+    return { scripts: [] };
+  }
+}
+
+function detectPackageManager(topLevelFiles: string[]): string | undefined {
+  if (topLevelFiles.includes("pnpm-lock.yaml") || topLevelFiles.includes("pnpm-workspace.yaml")) {
+    return "pnpm";
+  }
+  if (topLevelFiles.includes("bun.lock") || topLevelFiles.includes("bun.lockb")) {
+    return "bun";
+  }
+  if (topLevelFiles.includes("package-lock.json")) {
+    return "npm";
+  }
+  if (topLevelFiles.includes("yarn.lock")) {
+    return "yarn";
+  }
+  return undefined;
+}
+
+function detectEcosystems(topLevelFiles: string[]): string[] {
+  const ecosystems: string[] = [];
+  if (topLevelFiles.includes("package.json")) {
+    ecosystems.push("node");
+  }
+  if (topLevelFiles.includes("Cargo.toml")) {
+    ecosystems.push("rust");
+  }
+  if (topLevelFiles.includes("go.mod")) {
+    ecosystems.push("go");
+  }
+  if (topLevelFiles.includes("pyproject.toml")) {
+    ecosystems.push("python");
+  }
+  return ecosystems;
+}

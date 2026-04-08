@@ -161,6 +161,7 @@ One-sentence summary of the reusable memory.
 
 ## Commands
 
+- `/memory-init` seeds a first-pass project memory structure from the current repository root
 - `/memory-status` shows paths, topic counts, and in-session state
 - `/memory-extract` forces one extraction pass
 - `/memory-dream` forces one dream/consolidation pass
@@ -185,6 +186,7 @@ cd /vePFS-Mindverse/user/intern/ccss/pi-mono/packages/pi-claude-memory-extension
 Focused smoke tests also exercised:
 
 - topic repair and artifact rebuild
+- `/memory-init` project structure seeding
 - heuristic relevant-memory recall plus debug file output
 - cross-project relevant-memory recall (project + global user + external project)
 - dream lock handling for consolidation re-entry protection

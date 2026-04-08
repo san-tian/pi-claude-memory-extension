@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { runDream, shouldAutoDream } from "./dream.js";
 import { runExtraction } from "./extract.js";
+import { initializeProjectMemory } from "./init.js";
 import { ensureMemoryStore, scanProjectTopicHeaders, scanTopicHeaders, scanUserTopicHeaders } from "./memory-store.js";
 import { buildMemoryIndexMessage, buildMemorySystemPrompt } from "./prompts.js";
 import { getProjectMemoryPaths, getUserMemoryPaths } from "./paths.js";
@@ -71,6 +72,29 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
     if (dream.ok && ctx.hasUI) {
       ctx.ui.setStatus("claude-memory", `Memory dreamed (${dream.headers?.length ?? 0} topics)`);
     }
+  });
+
+  pi.registerCommand("memory-init", {
+    description: "Initialize project memory structure from the current repository root",
+    handler: async (_args, ctx) => {
+      const result = await initializeProjectMemory(ctx.cwd);
+      const detailLines = [
+        result.ok ? `- Status: ok` : `- Status: skipped`,
+        `- Initialized topic files: ${result.files.length}`,
+        `- Project topic count: ${result.headers.length}`,
+        ...result.files.map((filePath) => `- ${filePath}`),
+      ];
+
+      pi.sendMessage(
+        {
+          customType: REPORT_MESSAGE_TYPE,
+          content: `## Memory Init\n\n${detailLines.join("\n")}`,
+          display: true,
+          details: result,
+        },
+        { triggerTurn: false },
+      );
+    },
   });
 
   pi.registerCommand("memory-status", {
