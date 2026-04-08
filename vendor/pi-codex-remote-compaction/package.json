@@ -1,0 +1,25 @@
+{
+  "name": "pi-codex-remote-compaction",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi package for Codex-style remote compaction on OpenAI Responses.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/san-tian/pi-codex-remote-compaction.git"
+  },
+  "keywords": ["pi-package"],
+  "dependencies": {
+    "@san-tian/pi-project-paths": "file:../pi-project-paths"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "compare": "node tools/compare_requests.mjs fixtures/codex/post-compaction.request.json fixtures/pi/overflow-retry.request.json",
+    "verify:auto": "node tools/verify_auto_compaction.mjs"
+  }
+}

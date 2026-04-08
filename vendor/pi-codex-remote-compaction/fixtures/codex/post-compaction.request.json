@@ -1,0 +1,37 @@
+{
+  "body": {
+    "model": "example-openai-responses-model",
+    "input": [
+      {
+        "role": "developer",
+        "content": "You are an expert coding assistant operating inside pi."
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "status": "completed",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "# AGENTS.md instructions for /workspace/project\n\n<INSTRUCTIONS>\nUse concise edits and verify important behavior changes.\n</INSTRUCTIONS>\n\n<environment_context>\n  <cwd>/workspace/project</cwd>\n  <shell>bash</shell>\n  <current_date>2026-03-30</current_date>\n  <timezone>UTC</timezone>\n</environment_context>"
+          }
+        ]
+      },
+      {
+        "type": "compaction_summary",
+        "encrypted_content": "REDACTED"
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "List the current directory and then reply with the absolute path only."
+          }
+        ]
+      }
+    ],
+    "stream": true,
+    "tools": []
+  }
+}
