@@ -9,35 +9,11 @@ import {
 import { getProjectMemoryPaths } from "./paths.js";
 import type { MemoryTopicType, MemoryTopicHeader } from "./types.js";
 
-const INIT_TOPIC_IDS = ["repository-overview", "repository-layout", "repository-tooling"] as const;
-
-type InitTopicId = (typeof INIT_TOPIC_IDS)[number];
-
 type InitResult = {
   ok: boolean;
   headers: MemoryTopicHeader[];
   files: string[];
 };
-
-export async function initializeProjectMemory(cwd: string): Promise<InitResult> {
-  const paths = getProjectMemoryPaths(cwd);
-  await fs.mkdir(paths.topicsDir, { recursive: true });
-
-  const snapshot = await collectProjectSnapshot(cwd);
-  const now = new Date().toISOString();
-  const topics = buildInitTopics(snapshot, now);
-  const files: string[] = [];
-
-  for (const topic of topics) {
-    const filePath = path.join(paths.topicsDir, `${topic.id}.md`);
-    await fs.writeFile(filePath, topic.content, "utf8");
-    files.push(filePath);
-  }
-
-  await rebuildProjectMemoryArtifacts(cwd);
-  const headers = await scanProjectTopicHeaders(cwd);
-  return { ok: true, headers, files };
-}
 
 type ProjectSnapshot = {
   cwd: string;
@@ -52,6 +28,57 @@ type ProjectSnapshot = {
   packageScripts: string[];
   ecosystems: string[];
 };
+
+type InitTopic = {
+  id: string;
+  title: string;
+  type: MemoryTopicType;
+  summary: string;
+  keywords: string[];
+  detailLines: Array<string | undefined>;
+};
+
+const RESERVED_INIT_TOPICS = [
+  "repository-overview",
+  "deployment-workflow",
+  "sync-workflow",
+  "testing-workflow",
+] as const;
+
+const FEATURE_DIR_BLOCKLIST = new Set([
+  "node_modules",
+  ".git",
+  ".github",
+  ".idea",
+  ".vscode",
+  "dist",
+  "build",
+  "coverage",
+  "tmp",
+  ".tmp",
+  "logs",
+]);
+
+export async function initializeProjectMemory(cwd: string): Promise<InitResult> {
+  const paths = getProjectMemoryPaths(cwd);
+  await fs.mkdir(paths.topicsDir, { recursive: true });
+
+  const snapshot = await collectProjectSnapshot(cwd);
+  const now = new Date().toISOString();
+  const topics = buildInitTopics(snapshot);
+  const files: string[] = [];
+
+  for (const topic of topics) {
+    const filePath = path.join(paths.topicsDir, `${topic.id}.md`);
+    const content = renderInitializedTopic(topic, now);
+    await fs.writeFile(filePath, content, "utf8");
+    files.push(filePath);
+  }
+
+  await rebuildProjectMemoryArtifacts(cwd);
+  const headers = await scanProjectTopicHeaders(cwd);
+  return { ok: true, headers, files };
+}
 
 async function collectProjectSnapshot(cwd: string): Promise<ProjectSnapshot> {
   const entries = await fs.readdir(cwd, { withFileTypes: true }).catch(() => []);
@@ -89,6 +116,8 @@ async function collectProjectSnapshot(cwd: string): Promise<ProjectSnapshot> {
       "go.mod",
       "pyproject.toml",
       "Makefile",
+      "docker-compose.yml",
+      "Dockerfile",
     ].includes(name),
   );
 
@@ -107,16 +136,17 @@ async function collectProjectSnapshot(cwd: string): Promise<ProjectSnapshot> {
   };
 }
 
-function buildInitTopics(snapshot: ProjectSnapshot, updatedAt: string): Array<{ id: InitTopicId; content: string }> {
+function buildInitTopics(snapshot: ProjectSnapshot): InitTopic[] {
+  const featureTopics = buildFeatureTopics(snapshot);
+
   return [
-    buildTopic(
-      "repository-overview",
-      "Repository Overview",
-      "project",
-      buildOverviewSummary(snapshot),
-      updatedAt,
-      ["overview", ...snapshot.ecosystems.slice(0, 3)],
-      [
+    {
+      id: "repository-overview",
+      title: "Repository Overview",
+      type: "project",
+      summary: buildOverviewSummary(snapshot),
+      keywords: ["overview", ...snapshot.ecosystems.slice(0, 3)],
+      detailLines: [
         `- Project id: ${snapshot.projectId}`,
         `- Working directory: ${snapshot.cwd}`,
         snapshot.readmeTitle ? `- README title: ${snapshot.readmeTitle}` : undefined,
@@ -124,63 +154,190 @@ function buildInitTopics(snapshot: ProjectSnapshot, updatedAt: string): Array<{ 
         snapshot.packageName ? `- Package name: ${snapshot.packageName}` : undefined,
         snapshot.packageManager ? `- Package manager signal: ${snapshot.packageManager}` : undefined,
         snapshot.ecosystems.length > 0 ? `- Detected ecosystems: ${snapshot.ecosystems.join(", ")}` : undefined,
+        featureTopics.length > 0 ? `- Initialized feature topics: ${featureTopics.map((topic) => topic.title).join(", ")}` : undefined,
+        "- This overview topic exists to connect the initialized Feature / Flow / Work Record / Session Record structure.",
       ],
-    ),
-    buildTopic(
-      "repository-layout",
-      "Repository Layout",
-      "project",
-      buildLayoutSummary(snapshot),
-      updatedAt,
-      ["layout", ...snapshot.topLevelDirs.slice(0, 4)],
-      [
-        snapshot.topLevelDirs.length > 0 ? `- Top-level directories: ${snapshot.topLevelDirs.join(", ")}` : "- No top-level directories detected.",
-        snapshot.topLevelFiles.length > 0 ? `- Top-level files: ${snapshot.topLevelFiles.join(", ")}` : "- No top-level files detected.",
-        snapshot.keyFiles.length > 0 ? `- Key entry files: ${snapshot.keyFiles.join(", ")}` : undefined,
-        "- This topic is generated by `/memory-init` and can be refreshed when the repository layout changes materially.",
-      ],
-    ),
-    buildTopic(
-      "repository-tooling",
-      "Repository Tooling",
-      "project",
-      buildToolingSummary(snapshot),
-      updatedAt,
-      ["tooling", ...(snapshot.packageScripts.length > 0 ? snapshot.packageScripts.slice(0, 3) : snapshot.ecosystems.slice(0, 3))],
-      [
-        snapshot.packageManager ? `- Package manager signal: ${snapshot.packageManager}` : undefined,
-        snapshot.packageScripts.length > 0 ? `- package.json scripts: ${snapshot.packageScripts.join(", ")}` : undefined,
-        snapshot.keyFiles.includes("tsconfig.json") ? "- TypeScript config detected via `tsconfig.json`." : undefined,
-        snapshot.keyFiles.includes("Cargo.toml") ? "- Rust tooling detected via `Cargo.toml`." : undefined,
-        snapshot.keyFiles.includes("go.mod") ? "- Go tooling detected via `go.mod`." : undefined,
-        snapshot.keyFiles.includes("pyproject.toml") ? "- Python tooling detected via `pyproject.toml`." : undefined,
-      ],
-    ),
+    },
+    ...featureTopics,
+    buildDevelopmentTopic(snapshot),
+    buildDeploymentTopic(snapshot),
+    buildSyncTopic(snapshot),
+    buildTestingTopic(snapshot),
+    buildWorkRecordsTopic(snapshot),
+    buildSessionRecordsTopic(snapshot),
   ];
 }
 
-function buildTopic(
-  id: InitTopicId,
-  title: string,
-  type: MemoryTopicType,
-  summary: string,
-  updatedAt: string,
-  keywords: string[],
-  detailLines: Array<string | undefined>,
-): { id: InitTopicId; content: string } {
-  const base = renderTopicTemplate({
-    id,
-    title,
-    type,
-    summary,
-    updatedAt,
-    keywords: keywords.filter(Boolean),
-  });
-  const details = detailLines.filter(Boolean).join("\n");
+function buildFeatureTopics(snapshot: ProjectSnapshot): InitTopic[] {
+  const candidates = snapshot.topLevelDirs.filter((dir) => !FEATURE_DIR_BLOCKLIST.has(dir));
+  const selected = candidates.slice(0, 6);
+
+  if (selected.length === 0) {
+    return [
+      {
+        id: "feature-root-surface",
+        title: "Feature: Root Surface",
+        type: "project",
+        summary: "The repository does not expose obvious top-level feature directories yet, so the current feature surface is concentrated in root files.",
+        keywords: ["feature", "root", "layout"],
+        detailLines: [
+          snapshot.topLevelFiles.length > 0 ? `- Top-level files: ${snapshot.topLevelFiles.join(", ")}` : undefined,
+          "- This topic is the fallback Feature topic when the repository has not split into clear top-level capability directories yet.",
+          "- Re-run `/memory-init` after the project grows clearer feature directories.",
+        ],
+      },
+    ];
+  }
+
+  return selected.map((dir) => ({
+    id: `feature-${toTopicId(dir)}`,
+    title: `Feature: ${humanize(dir)}`,
+    type: "project",
+    summary: `Top-level feature surface currently includes the ${dir} directory; treat it as one of the main project capability areas until deeper memory extraction refines the model.`,
+    keywords: ["feature", dir],
+    detailLines: [
+      `- Source directory: ${dir}`,
+      snapshot.keyFiles.length > 0 ? `- Root key files nearby: ${snapshot.keyFiles.join(", ")}` : undefined,
+      "- This topic is seeded from repository structure and should be enriched later with implementation-specific knowledge.",
+    ],
+  }));
+}
+
+function buildDevelopmentTopic(snapshot: ProjectSnapshot): InitTopic {
+  const signals = [
+    snapshot.packageManager ? `package manager: ${snapshot.packageManager}` : undefined,
+    snapshot.packageScripts.length > 0 ? `package scripts: ${snapshot.packageScripts.join(", ")}` : undefined,
+    snapshot.topLevelDirs.includes("src") ? "src/" : undefined,
+    snapshot.topLevelDirs.includes("docs") ? "docs/" : undefined,
+  ].filter(Boolean);
+
   return {
-    id,
-    content: `${base}${details ? `${details}\n` : ""}`,
+    id: "flow-development",
+    title: "Flow: Development",
+    type: "project",
+    summary:
+      signals.length > 0
+        ? `Development flow signals currently include ${signals.join(", ")}.`
+        : "Development flow has not been inferred yet; this topic reserves a stable place for day-to-day coding workflow guidance.",
+    keywords: ["flow", "development", "coding"],
+    detailLines: [
+      signals.length > 0 ? `- Current development signals: ${signals.join(", ")}` : "- No explicit development-flow signals detected yet.",
+      "- Use this topic for coding workflow, startup order, and day-to-day implementation habits.",
+    ],
   };
+}
+
+function buildDeploymentTopic(snapshot: ProjectSnapshot): InitTopic {
+  const signals = [
+    snapshot.topLevelFiles.includes("Dockerfile") ? "Dockerfile" : undefined,
+    snapshot.topLevelFiles.includes("docker-compose.yml") ? "docker-compose.yml" : undefined,
+    snapshot.packageScripts.find((name) => /deploy|release|start/.test(name)) ? `package script: ${snapshot.packageScripts.find((name) => /deploy|release|start/.test(name))}` : undefined,
+  ].filter(Boolean);
+
+  return {
+    id: "flow-deployment",
+    title: "Flow: Deployment",
+    type: "project",
+    summary:
+      signals.length > 0
+        ? `Deployment-related signals currently include ${signals.join(", ")}.`
+        : "Deployment flow has not been inferred yet; this topic exists so deployment knowledge has a stable home from the start.",
+    keywords: ["deployment", "release", ...(signals as string[]).map((signal) => toTopicId(signal))],
+    detailLines: [
+      signals.length > 0 ? `- Current deployment signals: ${signals.join(", ")}` : "- No explicit deployment files or scripts detected yet.",
+      "- Use this topic for release, environment, and delivery workflow knowledge as it becomes clear.",
+    ],
+  };
+}
+
+function buildSyncTopic(snapshot: ProjectSnapshot): InitTopic {
+  const signals = [
+    snapshot.topLevelFiles.includes("AGENTS.md") ? "AGENTS.md" : undefined,
+    snapshot.topLevelDirs.includes("docs") ? "docs/" : undefined,
+    snapshot.readmeSummary ? "README.md" : undefined,
+  ].filter(Boolean);
+
+  return {
+    id: "flow-sync",
+    title: "Flow: Sync",
+    type: "project",
+    summary:
+      signals.length > 0
+        ? `Documentation and coordination sync signals currently include ${signals.join(", ")}.`
+        : "Sync workflow has not been inferred yet; this topic reserves a stable place for documentation and coordination rules.",
+    keywords: ["sync", "docs", "coordination"],
+    detailLines: [
+      signals.length > 0 ? `- Current sync signals: ${signals.join(", ")}` : "- No explicit sync/documentation signals detected yet.",
+      "- Use this topic for doc updates, memory refresh, and coordination handoff rules.",
+    ],
+  };
+}
+
+function buildTestingTopic(snapshot: ProjectSnapshot): InitTopic {
+  const testScripts = snapshot.packageScripts.filter((name) => /test|check|verify|lint/.test(name));
+  const signals = [
+    ...testScripts.map((name) => `package script: ${name}`),
+    snapshot.topLevelDirs.includes("tests") ? "tests/" : undefined,
+    snapshot.topLevelDirs.includes("test") ? "test/" : undefined,
+  ].filter(Boolean);
+
+  return {
+    id: "flow-testing",
+    title: "Flow: Testing",
+    type: "project",
+    summary:
+      signals.length > 0
+        ? `Testing-related signals currently include ${signals.join(", ")}.`
+        : "Testing flow has not been inferred yet; this topic reserves a stable place for validation rules and test commands.",
+    keywords: ["flow", "testing", "validation", ...testScripts.slice(0, 3)],
+    detailLines: [
+      signals.length > 0 ? `- Current testing signals: ${signals.join(", ")}` : "- No explicit test files or scripts detected yet.",
+      "- Use this topic for canonical validation commands and testing expectations as they become known.",
+    ],
+  };
+}
+
+function buildWorkRecordsTopic(snapshot: ProjectSnapshot): InitTopic {
+  return {
+    id: "work-records-structure",
+    title: "Work Records Structure",
+    type: "project",
+    summary: "Work-record memory should track the current focus, open threads, and durable decisions that matter for future collaboration.",
+    keywords: ["work-records", "coordination", "handoff"],
+    detailLines: [
+      `- Current project id: ${snapshot.projectId}`,
+      "- Use this topic to hold the evolving shape of current focus, open items, and durable decisions.",
+      "- The goal is not to preserve every temporary detail, but to preserve the structure needed for future work to restart cleanly.",
+    ],
+  };
+}
+
+function buildSessionRecordsTopic(snapshot: ProjectSnapshot): InitTopic {
+  return {
+    id: "session-records-structure",
+    title: "Session Records Structure",
+    type: "project",
+    summary: "Session-record memory should preserve restartable handoff structure between work sessions without depending on old temporary transcripts.",
+    keywords: ["session-records", "handoff", "restart"],
+    detailLines: [
+      `- Current project id: ${snapshot.projectId}`,
+      "- Use this topic to preserve how a session should hand off to the next session or agent.",
+      "- Prefer stable handoff structure over temporary per-turn detail.",
+    ],
+  };
+}
+
+function renderInitializedTopic(topic: InitTopic, updatedAt: string): string {
+  const base = renderTopicTemplate({
+    id: topic.id,
+    title: topic.title,
+    type: topic.type,
+    summary: topic.summary,
+    updatedAt,
+    keywords: topic.keywords.filter(Boolean),
+  });
+  const details = topic.detailLines.filter(Boolean).join("\n");
+  return `${base}${details ? `${details}\n` : ""}`;
 }
 
 function buildOverviewSummary(snapshot: ProjectSnapshot): string {
@@ -190,24 +347,6 @@ function buildOverviewSummary(snapshot: ProjectSnapshot): string {
   const name = snapshot.readmeTitle ?? snapshot.packageName ?? path.basename(snapshot.cwd);
   const ecosystem = snapshot.ecosystems.length > 0 ? snapshot.ecosystems.join("/") : "project";
   return `${name} is a ${ecosystem} repository that should be initialized from the current root structure before deeper memory extraction begins.`;
-}
-
-function buildLayoutSummary(snapshot: ProjectSnapshot): string {
-  if (snapshot.topLevelDirs.length === 0 && snapshot.topLevelFiles.length === 0) {
-    return "The repository root is currently sparse and should be rescanned once more files exist.";
-  }
-  const dirPreview = snapshot.topLevelDirs.slice(0, 4).join(", ") || "no major directories";
-  return `Top-level structure currently centers on ${dirPreview}, with key files anchored at the repository root.`;
-}
-
-function buildToolingSummary(snapshot: ProjectSnapshot): string {
-  if (snapshot.packageScripts.length > 0) {
-    return `Primary tooling is exposed through package scripts: ${snapshot.packageScripts.slice(0, 4).join(", ")}.`;
-  }
-  if (snapshot.ecosystems.length > 0) {
-    return `Primary tooling appears to come from the detected ecosystems: ${snapshot.ecosystems.join(", ")}.`;
-  }
-  return "No obvious build or package tooling was detected at the repository root yet.";
 }
 
 function parseReadme(content: string): { title?: string; summary?: string } {
@@ -272,4 +411,16 @@ function detectEcosystems(topLevelFiles: string[]): string[] {
     ecosystems.push("python");
   }
   return ecosystems;
+}
+
+function toTopicId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "topic";
+}
+
+function humanize(value: string): string {
+  return value
+    .split(/[-_./]+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
 }

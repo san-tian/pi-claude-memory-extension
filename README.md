@@ -161,7 +161,7 @@ One-sentence summary of the reusable memory.
 
 ## Commands
 
-- `/memory-init` seeds a first-pass project memory structure from the current repository root
+- `/memory-init` seeds a first-pass project memory structure from the current repository root, with Feature topics plus dedicated Flow topics for development, deployment, sync, and testing
 - `/memory-status` shows paths, topic counts, and in-session state
 - `/memory-extract` forces one extraction pass
 - `/memory-dream` forces one dream/consolidation pass
