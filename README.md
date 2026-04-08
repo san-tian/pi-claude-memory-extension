@@ -46,8 +46,9 @@ pi -e ./extensions/claude-memory/index.ts
 This package already includes the extension entries for:
 
 - `pi-session-memory-extension`
-- `pi-subagent-tool`
 - `pi-codex-remote-compaction`
+
+It still depends on `pi-subagent-tool` for the internal subagent runtime helper, but it does not register the public `subagent` tool automatically. This avoids tool-registration conflicts when another `subagent` package is already loaded.
 
 ## Requirements
 

@@ -40,7 +40,6 @@
     "extensions": [
       "./extensions",
       "./vendor/pi-session-memory-extension/extensions",
-      "./vendor/pi-subagent-tool/extensions",
       "./vendor/pi-codex-remote-compaction/index.ts"
     ]
   },
