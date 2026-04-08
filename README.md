@@ -48,7 +48,13 @@ This package automatically loads these installed package dependencies:
 - `pi-session-memory-extension`
 - `pi-codex-remote-compaction`
 
-It also depends on `pi-subagent-tool` for the internal subagent runtime helper, but it does not register the public `subagent` tool automatically. This avoids tool-registration conflicts when another `subagent` package is already loaded. If you want the public `subagent` tool in Pi, install `git:github.com/san-tian/pi-subagent-tool` separately.
+This package does not bundle or install `pi-subagent-tool` internally. Long-term memory extraction/recall/dream rely on the separately installed `pi-subagent-tool` package at runtime. If you want this extension to work fully, install:
+
+```bash
+pi install git:github.com/san-tian/pi-subagent-tool
+```
+
+That package provides the subagent runtime helper, while this package avoids registering the public `subagent` tool itself.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { runPiSubagent } from "pi-subagent-tool/extensions/subagent/runtime";
+import { runPiSubagent } from "./pi-subagent-runtime.js";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ensureMemoryStore, scanProjectTopicHeaders, scanUserTopicHeaders } from "./memory-store.js";
 import { getCanonicalProjectsRoot, getProjectMemoryPaths } from "./paths.js";

@@ -6,7 +6,7 @@ import {
   type ExtensionContext,
   type SessionEntry,
 } from "@mariozechner/pi-coding-agent";
-import { runPiSubagent } from "pi-subagent-tool/extensions/subagent/runtime";
+import { runPiSubagent } from "./pi-subagent-runtime.js";
 import {
   ensureMemoryStore,
   rebuildMemoryArtifacts,

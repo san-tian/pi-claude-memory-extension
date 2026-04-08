@@ -20,8 +20,7 @@
   "dependencies": {
     "@san-tian/pi-project-paths": "git+https://github.com/san-tian/pi-project-paths.git",
     "pi-codex-remote-compaction": "git+https://github.com/san-tian/pi-codex-remote-compaction.git",
-    "pi-session-memory-extension": "git+https://github.com/san-tian/pi-session-memory-extension.git",
-    "pi-subagent-tool": "git+https://github.com/san-tian/pi-subagent-tool.git"
+    "pi-session-memory-extension": "git+https://github.com/san-tian/pi-session-memory-extension.git"
   },
   "peerDependencies": {
     "@mariozechner/pi-agent-core": "*",
