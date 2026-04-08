@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   buildSessionContext,
   convertToLlm,
@@ -101,7 +102,7 @@ export async function runExtraction(
       return { ok: false, error: "No model available for long-term memory extraction" };
     }
 
-    const result = await runPiSubagent({
+    const result = await runExtractionSubagentWithRetries(ctx, {
       cwd: ctx.cwd,
       prompt,
       model: formatSubagentModelSpec(model),
@@ -263,6 +264,50 @@ function hasToolCallsInLastAssistantTurn(entries: SessionEntry[]): boolean {
     });
   }
   return false;
+}
+
+async function runExtractionSubagentWithRetries(
+  ctx: ExtensionContext,
+  options: Parameters<typeof runPiSubagent>[0],
+) {
+  const retryDelaysMs = [0, 2000, 5000];
+  let lastResult: Awaited<ReturnType<typeof runPiSubagent>> | undefined;
+
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
+    if (retryDelaysMs[attempt] > 0) {
+      await delay(retryDelaysMs[attempt], undefined, { signal: ctx.signal }).catch(() => undefined);
+    }
+
+    const result = await runPiSubagent(options);
+    lastResult = result;
+    if (!isTransientSubagentFailure(result)) {
+      return result;
+    }
+  }
+
+  return lastResult ?? (await runPiSubagent(options));
+}
+
+function isTransientSubagentFailure(result: {
+  exitCode: number;
+  stderr: string;
+  errorMessage?: string;
+  stopReason?: string;
+}): boolean {
+  const message = `${result.errorMessage ?? ""}\n${result.stderr}`.toLowerCase();
+  if (result.stopReason !== "error") {
+    return false;
+  }
+  return (
+    message.includes("an error occurred while processing your request") ||
+    message.includes("temporarily unavailable") ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("rate limit") ||
+    message.includes("server had an error") ||
+    message.includes("try again") ||
+    /\b5\d\d\b/.test(message)
+  );
 }
 
 function roughTokenCount(content: string): number {
