@@ -18,17 +18,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@san-tian/pi-project-paths": "file:./vendor/pi-project-paths",
-    "pi-codex-remote-compaction": "file:./vendor/pi-codex-remote-compaction",
-    "pi-session-memory-extension": "file:./vendor/pi-session-memory-extension",
-    "pi-subagent-tool": "file:./vendor/pi-subagent-tool"
+    "@san-tian/pi-project-paths": "git+https://github.com/san-tian/pi-project-paths.git",
+    "pi-codex-remote-compaction": "git+https://github.com/san-tian/pi-codex-remote-compaction.git",
+    "pi-session-memory-extension": "git+https://github.com/san-tian/pi-session-memory-extension.git",
+    "pi-subagent-tool": "git+https://github.com/san-tian/pi-subagent-tool.git"
   },
-  "bundledDependencies": [
-    "@san-tian/pi-project-paths",
-    "pi-codex-remote-compaction",
-    "pi-session-memory-extension",
-    "pi-subagent-tool"
-  ],
   "peerDependencies": {
     "@mariozechner/pi-agent-core": "*",
     "@mariozechner/pi-ai": "*",
@@ -39,14 +33,8 @@
   "pi": {
     "extensions": [
       "./extensions",
-      "./vendor/pi-session-memory-extension/extensions",
-      "./vendor/pi-codex-remote-compaction/index.ts"
+      "./node_modules/pi-session-memory-extension/extensions",
+      "./node_modules/pi-codex-remote-compaction/index.ts"
     ]
-  },
-  "bundleDependencies": [
-    "@san-tian/pi-project-paths",
-    "pi-codex-remote-compaction",
-    "pi-session-memory-extension",
-    "pi-subagent-tool"
-  ]
+  }
 }

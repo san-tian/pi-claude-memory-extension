@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { getPiProjectDir, getPiProjectsDir, getProjectId } from "@san-tian/pi-project-paths";
+import { getProjectId } from "@san-tian/pi-project-paths";
 
 export type ClaudeMemoryScope = "project" | "user" | "external-project";
 
@@ -19,6 +19,10 @@ export interface ClaudeMemoryPaths {
 }
 
 const PROJECTS_DIR_NAME = "project";
+
+function getCanonicalProjectId(cwd: string): string {
+  return getProjectId(cwd);
+}
 
 function buildMemoryPaths(rootDir: string, scope: ClaudeMemoryScope, sourceProjectId?: string): ClaudeMemoryPaths {
   const stateDir = path.join(rootDir, "state");
@@ -45,11 +49,11 @@ function buildMemoryPaths(rootDir: string, scope: ClaudeMemoryScope, sourceProje
 }
 
 export function getCanonicalProjectRoot(cwd: string): string {
-  return getPiProjectDir(cwd, { projectsDirName: PROJECTS_DIR_NAME });
+  return path.join(homedir(), ".pi", PROJECTS_DIR_NAME, getCanonicalProjectId(cwd));
 }
 
 export function getCanonicalProjectsRoot(): string {
-  return getPiProjectsDir({ projectsDirName: PROJECTS_DIR_NAME });
+  return path.join(homedir(), ".pi", PROJECTS_DIR_NAME);
 }
 
 export function getProjectMemoryRoot(cwd: string): string {
@@ -64,7 +68,7 @@ export function getProjectMemoryPaths(cwd: string): ClaudeMemoryPaths {
   return buildMemoryPaths(
     getProjectMemoryRoot(cwd),
     "project",
-    getProjectId(cwd, { projectsDirName: PROJECTS_DIR_NAME }),
+    getCanonicalProjectId(cwd),
   );
 }
 
