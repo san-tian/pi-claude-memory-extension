@@ -34,6 +34,12 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
     const userPaths = getUserMemoryPaths();
     await ensureMemoryStore(ctx.cwd);
     const systemPrompt = `${event.systemPrompt}\n\n${buildMemorySystemPrompt(projectPaths.rootDir, userPaths.rootDir, DEFAULT_MEMORY_CONFIG)}`;
+
+    // Slash commands should stay lightweight and deterministic. Skip memory recall/index injection.
+    if (isSlashCommandPrompt(event.prompt)) {
+      return { systemPrompt };
+    }
+
     const recall = await buildRelevantMemoryMessage(pi, ctx, event.prompt);
     if (recall.message) {
       return {
@@ -224,6 +230,10 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
       );
     },
   });
+}
+
+function isSlashCommandPrompt(prompt: string): boolean {
+  return prompt.trimStart().startsWith("/");
 }
 
 async function readPreview(filePath: string): Promise<string> {
