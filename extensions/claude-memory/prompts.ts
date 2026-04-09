@@ -14,18 +14,18 @@ export function buildMemorySystemPrompt(
     "Store user-level memories in the global user memory root. Store project-specific feedback, project context, and reference memories in the current project's memory root.",
     "Do not treat memory as a source of truth over the codebase. When a recalled memory matters for a code change, verify it against the repository before taking irreversible actions.",
     "Do not write speculative, low-confidence, or one-off transient details into long-term memory.",
-    `When relevant memories are available, prefer the most relevant ${config.maxRelevantTopics} topics rather than assuming every memory store is already in context.`,
+    "The project and user MEMORY.md indexes are part of the base context for this session. Use them as the always-on directory of long-term memory topics.",
+    `When deeper recall is available, prefer the most relevant ${config.maxRelevantTopics} topic bodies rather than assuming every topic file is already loaded.`,
     "Relevant memories may include compact candidates from other projects, but those are only retrieval hints and should never override the current repository state.",
     "Session memory remains separate and is handled by the bundled session-memory package.",
   ].join("\n");
 }
 
-export function buildMemoryIndexMessage(indexPath: string, preview: string): string {
+export function buildMemoryIndexSection(title: string, indexPath: string, content: string): string {
   return [
-    `Persistent memory index: ${indexPath}`,
+    `## ${title}`,
+    `Source: ${indexPath}`,
     "",
-    "Use this as a compact guide to existing long-term memory topics. Relevant topic bodies can be recalled separately.",
-    "",
-    preview.trim(),
+    content.trim() || "(empty)",
   ].join("\n");
 }

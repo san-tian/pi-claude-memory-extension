@@ -4,7 +4,7 @@ import { runPiSubagent } from "./pi-subagent-runtime.js";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ensureMemoryStore, scanProjectTopicHeaders, scanUserTopicHeaders } from "./memory-store.js";
 import { getCanonicalProjectsRoot, getProjectMemoryPaths } from "./paths.js";
-import { getState, setState } from "./state.js";
+import { getSessionKey, getState, setState } from "./state.js";
 import {
   CLAUDE_MEMORY_SUBAGENT_ENV,
   formatSubagentError,
@@ -32,10 +32,24 @@ export interface RecallResult {
   };
 }
 
+type RecallPrefetchStatus = "pending" | "ready" | "error";
+
+interface RecallPrefetchTask {
+  prompt: string;
+  status: RecallPrefetchStatus;
+  startedAt: number;
+  controller: AbortController;
+  result?: RecallResult;
+  error?: string;
+}
+
+const recallPrefetches = new Map<string, RecallPrefetchTask>();
+
 export async function buildRelevantMemoryMessage(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   prompt: string,
+  options?: { signal?: AbortSignal },
 ): Promise<RecallResult> {
   await ensureMemoryStore(ctx.cwd);
   if (!prompt.trim()) {
@@ -55,9 +69,9 @@ export async function buildRelevantMemoryMessage(
     return { headers: [] };
   }
 
-  const selected = await rankRelevantHeaders(ctx, prompt, candidateHeaders);
+  const selected = await rankRelevantHeaders(ctx, prompt, candidateHeaders, options?.signal);
   const selectedHeaders = selected.length > 0 ? selected : heuristicFallback(prompt, candidateHeaders);
-  const expandedExternalKeys = await selectExpandedExternalRecallKeys(ctx, prompt, selectedHeaders);
+  const expandedExternalKeys = await selectExpandedExternalRecallKeys(ctx, prompt, selectedHeaders, options?.signal);
   const currentState = getState(ctx);
   const selectedIds = selectedHeaders.map(getRecallKey);
   if ((currentState.lastRecallTopicIds ?? []).join("|") !== selectedIds.join("|")) {
@@ -100,10 +114,91 @@ export async function buildRelevantMemoryMessage(
   };
 }
 
+export function prefetchRelevantMemory(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  prompt: string,
+): void {
+  const normalizedPrompt = prompt.trim();
+  const sessionKey = getSessionKey(ctx);
+  const existing = recallPrefetches.get(sessionKey);
+
+  if (!normalizedPrompt) {
+    existing?.controller.abort();
+    recallPrefetches.delete(sessionKey);
+    return;
+  }
+
+  if (existing?.prompt === normalizedPrompt && existing.status !== "error") {
+    return;
+  }
+
+  existing?.controller.abort();
+  const controller = new AbortController();
+  const task: RecallPrefetchTask = {
+    prompt: normalizedPrompt,
+    status: "pending",
+    startedAt: Date.now(),
+    controller,
+  };
+  recallPrefetches.set(sessionKey, task);
+
+  void (async () => {
+    try {
+      const result = await buildRelevantMemoryMessage(pi, ctx, normalizedPrompt, { signal: controller.signal });
+      const current = recallPrefetches.get(sessionKey);
+      if (current !== task || controller.signal.aborted) {
+        return;
+      }
+      current.status = "ready";
+      current.result = result;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      const current = recallPrefetches.get(sessionKey);
+      if (current !== task) {
+        return;
+      }
+      current.status = "error";
+      current.error = error instanceof Error ? error.message : String(error);
+      await writeRecallDebug(ctx.cwd, {
+        prompt: normalizedPrompt,
+        selectedTopicIds: [],
+        reason: "prefetch-error",
+        error: current.error,
+      }).catch(() => undefined);
+    }
+  })();
+}
+
+export function getPrefetchedRelevantMemory(
+  ctx: ExtensionContext,
+  prompt: string,
+): { status: RecallPrefetchStatus; result?: RecallResult; startedAt: number } | undefined {
+  const task = recallPrefetches.get(getSessionKey(ctx));
+  if (!task || task.prompt !== prompt.trim()) {
+    return undefined;
+  }
+  return {
+    status: task.status,
+    result: task.result,
+    startedAt: task.startedAt,
+  };
+}
+
+export function clearRelevantMemoryPrefetch(ctx: ExtensionContext): void {
+  const sessionKey = getSessionKey(ctx);
+  const task = recallPrefetches.get(sessionKey);
+  task?.controller.abort();
+  recallPrefetches.delete(sessionKey);
+}
+
 async function rankRelevantHeaders(
   ctx: ExtensionContext,
   prompt: string,
   candidateHeaders: MemoryTopicHeader[],
+  signal?: AbortSignal,
 ): Promise<MemoryTopicHeader[]> {
   const model = resolveModel(ctx);
   if (!model) {
@@ -127,7 +222,7 @@ async function rankRelevantHeaders(
     ].join("\n"),
     model: formatSubagentModelSpec(model),
     tools: [],
-    signal: ctx.signal,
+    signal: signal ?? ctx.signal,
     env: {
       [CLAUDE_MEMORY_SUBAGENT_ENV]: "1",
     },
@@ -166,6 +261,7 @@ async function selectExpandedExternalRecallKeys(
   ctx: ExtensionContext,
   prompt: string,
   headers: MemoryTopicHeader[],
+  signal?: AbortSignal,
 ): Promise<Set<string>> {
   const externalHeaders = headers.filter((header) => header.scope === "external-project");
   if (externalHeaders.length === 0) {
@@ -201,7 +297,7 @@ async function selectExpandedExternalRecallKeys(
     ].join("\n"),
     model: formatSubagentModelSpec(model),
     tools: [],
-    signal: ctx.signal,
+    signal: signal ?? ctx.signal,
     env: {
       [CLAUDE_MEMORY_SUBAGENT_ENV]: "1",
     },

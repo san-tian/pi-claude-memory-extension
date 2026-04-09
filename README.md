@@ -43,18 +43,21 @@ For quick local development:
 pi -e ./extensions/claude-memory/index.ts
 ```
 
-This package automatically loads these installed package dependencies:
+This package only loads its own extension entry.
 
-- `pi-session-memory-extension`
-- `pi-codex-remote-compaction`
-
-This package does not bundle or install `pi-subagent-tool` internally. Long-term memory extraction/recall/dream rely on the separately installed `pi-subagent-tool` package at runtime. If you want this extension to work fully, install:
+Install related packages independently when you want their behavior:
 
 ```bash
+pi install git:github.com/san-tian/pi-session-memory-extension
+pi install git:github.com/san-tian/pi-codex-remote-compaction
 pi install git:github.com/san-tian/pi-subagent-tool
 ```
 
-That package provides the subagent runtime helper, while this package avoids registering the public `subagent` tool itself.
+- `pi-session-memory-extension` stays responsible for session memory
+- `pi-codex-remote-compaction` stays responsible for remote compaction
+- `pi-subagent-tool` provides the separately installed subagent runtime helper used by this package
+
+This package does not bundle or auto-register those packages as child extensions.
 
 ## Requirements
 
