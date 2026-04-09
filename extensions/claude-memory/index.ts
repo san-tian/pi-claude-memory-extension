@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { runDream, shouldAutoDream } from "./dream.js";
 import { runExtraction } from "./extract.js";
@@ -9,11 +10,12 @@ import { getProjectMemoryPaths, getUserMemoryPaths } from "./paths.js";
 import { clearRelevantMemoryPrefetch, getPrefetchedRelevantMemory, prefetchRelevantMemory } from "./recall.js";
 import { REPORT_MESSAGE_TYPE, clearState, getSessionKey, getState, reconstructState } from "./state.js";
 import { isClaudeMemorySubagentProcess } from "./subagent.js";
-import { DEFAULT_MEMORY_CONFIG } from "./types.js";
+import { DEFAULT_MEMORY_CONFIG, type MemoryTopicHeader } from "./types.js";
 
 const MAX_INDEX_SECTION_CHARS = 12000;
 
 const memorySystemPromptCache = new Map<string, { version: string; prompt: string }>();
+const lastRecallUiHints = new Map<string, string>();
 
 export default function claudeMemoryExtension(pi: ExtensionAPI) {
   const rebuild = async (ctx: Parameters<Parameters<ExtensionAPI["on"]>[1]>[1]) => {
@@ -26,6 +28,7 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
   pi.on("session_shutdown", async (_event, ctx) => {
     clearRelevantMemoryPrefetch(ctx);
     memorySystemPromptCache.delete(getSessionKey(ctx));
+    lastRecallUiHints.delete(getSessionKey(ctx));
     clearState(ctx);
   });
 
@@ -39,6 +42,9 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
       return { action: "continue" };
     }
 
+    if (ctx.hasUI) {
+      ctx.ui.setStatus("claude-memory", "Recalling persistent memories...");
+    }
     prefetchRelevantMemory(pi, ctx, event.text);
     return { action: "continue" };
   });
@@ -58,6 +64,7 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
       return;
     }
 
+    showRecallUiHint(ctx, prompt, prefetched.result.headers);
     return {
       messages: [...event.messages, createRecallMessage(prefetched.result.message)] as typeof event.messages,
     };
@@ -79,6 +86,7 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
 
     const recall = getPrefetchedRelevantMemory(ctx, event.prompt);
     if (recall?.status === "ready" && recall.result?.message) {
+      showRecallUiHint(ctx, event.prompt, recall.result.headers);
       return {
         systemPrompt,
         message: recall.result.message,
@@ -96,17 +104,28 @@ export default function claudeMemoryExtension(pi: ExtensionAPI) {
     if (isClaudeMemorySubagentProcess()) {
       return;
     }
+    if (ctx.hasUI) {
+      ctx.ui.setStatus("claude-memory", "Checking whether persistent memory extraction should run...");
+    }
     const extraction = await runExtraction(pi, ctx, "auto");
     if (extraction.ok && ctx.hasUI) {
       ctx.ui.setStatus("claude-memory", `Memory extracted (${extraction.headers?.length ?? 0} topics)`);
+      ctx.ui.notify(`Persistent memory extraction completed with ${extraction.headers?.length ?? 0} topics.`, "info");
     }
 
     if (!shouldAutoDream(ctx)) {
+      if (ctx.hasUI && !extraction.ok) {
+        ctx.ui.setStatus("claude-memory", `Memory idle (${extraction.skipped ?? "no background work triggered"})`);
+      }
       return;
+    }
+    if (ctx.hasUI) {
+      ctx.ui.setStatus("claude-memory", "Dreaming persistent memories...");
     }
     const dream = await runDream(pi, ctx, "auto");
     if (dream.ok && ctx.hasUI) {
       ctx.ui.setStatus("claude-memory", `Memory dreamed (${dream.headers?.length ?? 0} topics)`);
+      ctx.ui.notify(`Persistent memory dream completed with ${dream.headers?.length ?? 0} topics.`, "info");
     }
   });
 
@@ -308,6 +327,36 @@ function createRecallMessage(message: {
     details: message.details,
     timestamp: Date.now(),
   };
+}
+
+function showRecallUiHint(
+  ctx: Parameters<Parameters<ExtensionAPI["on"]>[1]>[1],
+  prompt: string,
+  headers: MemoryTopicHeader[],
+): void {
+  if (!ctx.hasUI || headers.length === 0) {
+    return;
+  }
+
+  const sessionKey = getSessionKey(ctx);
+  const signature = `${prompt}::${headers.map((header) => header.path).join("|")}`;
+  if (lastRecallUiHints.get(sessionKey) === signature) {
+    return;
+  }
+  lastRecallUiHints.set(sessionKey, signature);
+
+  const preview = headers
+    .slice(0, 4)
+    .map((header) => path.basename(header.path))
+    .join(", ");
+  const extra = headers.length > 4 ? ` +${headers.length - 4} more` : "";
+  ctx.ui.setStatus("claude-memory", `Injected ${headers.length} memory file(s): ${preview}${extra}`);
+  ctx.ui.notify(
+    [`Injected persistent memories:`, ...headers.slice(0, 8).map((header) => `- ${header.path}`), headers.length > 8 ? `- ... and ${headers.length - 8} more` : ""]
+      .filter(Boolean)
+      .join("\n"),
+    "info",
+  );
 }
 
 function isUserMessage(message: unknown): message is { role: "user"; content: Array<{ text?: string }> } {
